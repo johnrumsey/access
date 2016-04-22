@@ -1,0 +1,190 @@
+What we want is a way to turn Evan's internet access off and on at specified
+future times, in addition to the current off/on now.
+
+atd has been installed, so we can cause scripts to be executed at specific
+future times.  However a reboot would likely lose all the at jobs.  We need
+something to run at boot time to reinstate at jobs.
+
+We need to keep data on what actions have been requested for when. A simple
+file of ( timestamp, action ) records (action is enable or disable) should
+suffice.  The first record should have the (past) time when the state was last
+changed, and what it was changed to.  The rest of the file should have all
+requested state settings, in increasing order of timestamp.
+
+We need a script which can be invoked:
+ - as an at job;
+ - by the web form which collects action ( timestamp, state ) pairs from users;
+ - as a "fixup" at boot time to ensure any required at job is queued.
+
+ parameters: zero or more ( timestamp, state ) pairs.
+
+Process:
+
+if state file does not exist:
+  open (create) the state file for writing, in such a way that it fails if
+    someone else created it in the meantime, with an exclusive lock.
+if the state file does exist, or the above create attempt fails:
+  open the state file for update with an exclusive lock.
+Load any state data from the state file into a state hash:
+  $state{ $timestamp } = 0 disable or 1 enable.
+  if oldest timestamp in the past, save it as current_timestamp, save its state
+    as current_state.
+Load any state parameters into the state hash.
+
+current state = observed state from router.
+last state = state of most recent past entry.
+next state = last state defined
+           ? 1 - last state if there is a future entry in this state, else undef
+           : state of nearest future entry.
+    
+Curr last next
+  u    u    u	Do nothing.  We have no info to act on.
+  u    u    0	queue job for next timestamp.
+  u    u    1	queue job for next timestamp.
+
+  u    0    u	set 0.
+  u    0    0	set 0. exclude next.
+  u    0    1	set 0. queue job for next timestamp.
+
+  u    1    u	set 1.
+  u    1    0	set 1. queue job for next timestamp.
+  u    1    1	set 1. exclude next.
+
+  0    u    u	do nothing
+  0    u    0	exclude next
+  0    u    1	queue job for next timestamp.
+
+  0    0    u	ok.
+  0    0    0	ok. exclude next.
+  0    0    1	ok.queue job for next timestamp.
+
+  0    1    u	set 1.
+  0    1    0	set 1.queue job for next timestamp.
+  0    1    1	set 1. exclude next.
+
+  1    u    u	do nothing
+  1    u    0	 ....................
+  1    u    1	
+
+  1    0    u	set 0.
+  1    0    0	set 0. exclude next.
+  1    0    1	set 0.
+
+  1    1    u	ok.
+  1    1    0	ok.
+  1    1    1	ok. exclude next
+
+
+
+
+#!/usr/bin/perl 
+
+# Manage Evan's Internet access.
+
+use strict;
+
+my $statefile = "statefile";
+my $fok = 0;
+my %state;
+my $current_timestamp;
+my $current_state;
+my $last_timestamp;
+my $last_state;
+my $next_timestamp;
+my $next_state;
+my $now = time();
+
+# Create and lock a new, empty, state file if there isn't one already.
+
+unless ( -e $statefile ) {	# No statefile: try to create new, empty one.
+  if ( sysopen( SF, $statefile, O_RDWR | O_EXCL | O_CREAT | O_EXLOCK ) ) {
+    $fok = 1;	# Create succeeded
+  } else {
+    print STDERR "Attempt to create $statefile failed: $!";
+  }
+}
+
+# Open existing state file for update.  Load state it contains (if any).
+
+unless ( $fok ) {
+  sysopen( SF, $statefile, O_RDWR | O_EXLOCK )
+    or die "Failed to open $statefile: $!\n";
+  while ( <SF> ) {
+    chomp;
+    if ( /^(\d+) ([01])$/ ) {
+      $state{ $1 } = $2;
+      unless ( $1 <= $now && ! defined $current_timestamp ) {
+        $current_timestamp = $1;
+        $current_state = $2;
+      }
+    }
+  }
+  truncate( SF, 0 ) or die "Failed to truncate $statefile.  Abort.\n";
+  $fok = 1;
+}
+
+# If we still don't have a state file we're in serious trouble: abort.
+unless ( $fok ) {
+  die "We still don't have access to statefile $statefile!\n";
+}
+
+# Load state parameters, if any.
+
+while ( scalar @ARGV >= 2 && $ARGV[0]=~ /^\d+$/ && $ARGV[1] =~ /^[01]$/ ) {
+  my $ts = shift;
+  $state{ $ts } = shift;
+}
+if ( scalar @ARGV ) {
+  die "unexpected or incorrectly formatted parameters. Abort.\n"
+}
+
+# Now figure out what state should be in right now, and if that doesn't match
+# current_state then fix it.  Re-write and close the state file.  Schedule an
+# at job to run this script for the next required state change.
+
+# Scan through past (missed) state change requests: only want the last one.
+
+for my $ts ( sort keys %state ) {
+  if ( $ts <= $now ) {
+    $last_timestamp = $ts;
+    $last_state = $state{ $ts };
+    delete $state{ $ts };
+  } else {
+    $next_state = $state{ $ts };
+    last;
+  }
+}
+
+# Fix current state to match last request, if it doesn't already.
+
+if ( defined $last_state ) {
+  if ( ! defined $current_state || $last_state != $current_state ) {
+    set_state( $last_state );
+    print SF "$now $last_state\n";
+  } else {
+    print SF "$current_timestamp $current_state\n";
+  }
+} elsif ( defined $next_state ) {
+  $last_state = 1 - $next_state;
+  set_state( $last_state );
+  print SF "$now $last_state\n";
+}
+
+# Copy remaining state entries to state file, but only where an actual state
+# change is required.  Note timestamp of next state change.
+
+for my $ts ( sort keys %state ) {
+  if ( $last_state != $state{ $ts } ) {
+    $last_state = $state{ $ts };
+    print SF "$ts $last_state\n";
+    $next_timestamp = $ts unless defined $next_timestamp;
+  }
+}
+close SF;
+
+# Queue an at job to process the next request, if there is one.
+
+if ( defined $next_timestamp ) {
+
+}
+

@@ -1,0 +1,42 @@
+/*	CSS uses C style comments:   /* ... */
+
+/* selector(s) { attribute: value; ... }	*/
+
+div#box {
+        border-top:           1px solid black;
+        border-left:          1px solid black;
+        width:                1044px;
+        height:               168px;
+}
+
+div.cell {
+        border-bottom:        1px solid black;
+        background-color:     white;
+        width:                10px;
+        height:               20px;
+        float:                left;
+}
+
+div.cell.b   {
+        border-right:         1px solid black;        
+}
+
+div.cell.en {
+        background-color:     #88f;
+}
+
+div.daybox  {
+        border-right:         1px solid black;        
+        border-bottom:        1px solid black;
+        width:                35px;
+        height:               20px;
+        float:                left;
+}
+
+div.th      {
+        border-right:         1px solid black;        
+        border-bottom:        1px solid black;
+        width:                41px;
+        height:               20px;        
+        float:                left;
+}

@@ -1,0 +1,41 @@
+Load state
+
+given a string of timestamp,state tuples like "1461015000 0 1461039300 1 1461041100 0", set enable/disable state on all cells.
+
+Have
+  nowDate - time of execution
+  startDate - time of beginning of first cell.
+
+unpack string into
+  changeTimes - sorted array of timestamps
+  states - object such that states[timestamp] = 0|1 (disable/enable)
+
+function loadState( s ) {
+  var startTS = startDate.getTime();
+  var changeTimes = [];
+  var states = {};
+  function loadState1( ts1, en1 ) {
+    changeTimes.push( ts1 );
+    states[ ts1 ] = en1;
+  }
+  let a = s.split( /\D+/ ).filter( function(t){ return t.length } );
+  for ( let i = 0; i < a.length; i += 2 )
+    loadState1( 1000 * a[i], +a[i+1] );
+  // Add a catchall disable immediately after last cell
+  loadState1( startTS + 604800000, 0 );
+
+  let nextTS;
+  let en = 0;
+  while ( nextTS = changeTimes.shift() && nextTS <= startTS )
+    en = state[ nextTS ];
+
+  let cellTS = startTS;
+  for ( let ci = 0; ci < 672; ci++ ) {
+    if ( cellTS >= nextTS ) {
+      en = states[ nextTS ];
+      nextTS = changeTimes.shift();
+    }
+    cells[ci].classList.toggle( 'en', en );
+    cellTS += 900000;
+  }
+}

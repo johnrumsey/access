@@ -1,0 +1,62 @@
+How it works
+
+package evani has these routines:
+
+  loadstate	creates|opens state file
+		locks state file
+		loads state hash from state file
+
+  storestate	truncates state file
+		writes current state hash to state file
+		closes state file.
+
+  stripstate	removes all past entries except most recent from state hash.
+		If no past entries adds a "now, current_state" entry if it can.
+		Removes all future entries that wouldn't cause a state change.
+		If last state is enabled, add a disable event at next midnight.
+
+		returns:	current expected state
+				next state transition timestamp
+
+  getstate	returns current firewall state:
+			undef	don't know
+			0	disabled
+			1	enabled
+
+  setstate	disables (0) or enables (1) access through firewall
+
+at job process
+==============	also used at system restart
+
+loadstate();
+$current_state = getstate();
+( $expected_state, $next_timestamp ) = stripstate( $current_state );
+if ( defined $expected_state && 
+     ( ! defined $current_state || $current_state != $expected_state ) ) {
+  setstate( $expected_state );
+}
+if ( defined $next_timestamp ) {
+  submit_at_job( $next_timestamp );
+}
+storestate();
+
+web page process
+================
+
+loadstate();
+$current_state = getstate();
+
+Add/delete events from form ...  Rebuild state list completely??
+
+( $expected_state, $next_timestamp ) = stripstate( $current_state );
+if ( defined $expected_state &&
+     ( ! defined $current_state || $current_state != $expected_state ) ) {
+  setstate( $expected_state );
+}
+if ( defined $next_timestamp ) {
+  submit_at_job( $next_timestamp );
+}
+storestate();
+
+display form.
+
